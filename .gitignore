@@ -1,6 +1,21 @@
-backend/awscliv2.zip
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
 .venv/
 venv/
-__pycache__/
-*.pyc
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
