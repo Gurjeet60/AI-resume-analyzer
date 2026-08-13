@@ -13,6 +13,7 @@ from app.models import User, Resume, ResumeAnalysis
 
 from app.api.resumes import router as resumes_router
 from app.api.analysis import router as analysis_router
+from app.api.job_match import router as job_match_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -36,6 +37,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(resumes_router)
 app.include_router(analysis_router)
+app.include_router(job_match_router)
 
 
 @app.get("/")

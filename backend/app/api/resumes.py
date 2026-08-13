@@ -1,17 +1,14 @@
-import os
 import uuid
 from pathlib import Path
 
-from app.models.resume import Resume
-from app.models.analysis import ResumeAnalysis
-
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
-from app.services.document_parser import extract_text
 
 from app.core.database import get_db
-from app.models import Resume, User
 from app.core.security import get_current_user
+from app.models import Resume, User
+from app.models.analysis import ResumeAnalysis
+from app.services.resume_parser import extract_resume_text
 
 
 router = APIRouter(
@@ -92,7 +89,7 @@ async def upload_resume(
 
     # 7. Extract resume text
     try:
-        extracted_text = extract_text(str(file_path))
+        extracted_text = extract_resume_text(file_path)
 
     except Exception as exc:
         # Remove the uploaded file if parsing fails

@@ -1,1 +1,6 @@
 backend/awscliv2.zip
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc

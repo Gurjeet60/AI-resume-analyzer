@@ -29,26 +29,171 @@ COMMON_SKILLS = {
     "redis",
     "rest api",
     "graphql",
+    "html",
+    "css",
+    "tailwind",
+    "next.js",
+    "express",
+    "spring",
+    "c++",
+    "c#",
+    "php",
+    "laravel",
+    "ruby",
+    "go",
+    "rust",
+    "kotlin",
+    "swift",
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "tensorflow",
+    "pytorch",
+    "machine learning",
+    "deep learning",
+    "data science",
+    "power bi",
+    "tableau",
+}
+
+
+SECTION_KEYWORDS = {
+    "contact": [
+        "email",
+        "phone",
+        "mobile",
+        "linkedin",
+        "github",
+        "contact",
+    ],
+    "summary": [
+        "summary",
+        "professional summary",
+        "profile",
+        "objective",
+        "career objective",
+        "about me",
+    ],
+    "skills": [
+        "skills",
+        "technical skills",
+        "technical expertise",
+        "technologies",
+        "technology",
+        "competencies",
+    ],
+    "experience": [
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+        "work history",
+        "internship",
+    ],
+    "education": [
+        "education",
+        "academic",
+        "academic background",
+        "university",
+        "college",
+        "degree",
+        "bachelor",
+        "master",
+    ],
+    "projects": [
+        "projects",
+        "personal projects",
+        "academic projects",
+        "project experience",
+        "key projects",
+    ],
+}
+
+
+ACTION_VERBS = {
+    "built",
+    "developed",
+    "created",
+    "designed",
+    "implemented",
+    "engineered",
+    "managed",
+    "led",
+    "optimized",
+    "automated",
+    "deployed",
+    "configured",
+    "improved",
+    "integrated",
+    "maintained",
+    "delivered",
+    "develop",
+    "build",
+    "design",
+    "implement",
+    "manage",
+    "lead",
+    "optimize",
+    "automate",
 }
 
 
 def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text.lower()).strip()
+    """
+    Normalize resume text for consistent analysis.
+    """
+    if not text:
+        return ""
+
+    text = text.lower()
+
+    # Normalize common punctuation/separators.
+    text = re.sub(r"[•▪●]", " ", text)
+    text = re.sub(r"[/|]", " ", text)
+
+    # Collapse whitespace.
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+def contains_keyword(text: str, keyword: str) -> bool:
+    """
+    Match complete words where possible.
+
+    This prevents things such as:
+        'go' matching 'google'
+        'sql' matching unrelated text
+    """
+    keyword = keyword.lower().strip()
+
+    if not keyword:
+        return False
+
+    pattern = r"(?<![a-z0-9+#.])" + re.escape(keyword) + r"(?![a-z0-9+#.])"
+
+    return re.search(pattern, text) is not None
 
 
 def detect_skills(text: str) -> list[str]:
+    """
+    Detect technical skills from the resume.
+    """
     normalized = normalize_text(text)
 
     detected = []
 
     for skill in COMMON_SKILLS:
-        if skill in normalized:
+        if contains_keyword(normalized, skill):
             detected.append(skill)
 
     return sorted(detected)
 
 
-def detect_sections(text: str) -> dict:
+def detect_sections(text: str) -> dict[str, bool]:
+    """
+    Detect important resume sections.
+    """
     normalized = normalize_text(text)
 
     sections = {
@@ -60,135 +205,300 @@ def detect_sections(text: str) -> dict:
         "projects": False,
     }
 
-    section_keywords = {
-        "contact": [
-            "email",
-            "phone",
-            "linkedin",
-            "github",
-        ],
-        "summary": [
-            "summary",
-            "profile",
-            "objective",
-        ],
-        "skills": [
-            "skills",
-            "technical skills",
-            "technologies",
-        ],
-        "experience": [
-            "experience",
-            "work experience",
-            "employment",
-        ],
-        "education": [
-            "education",
-            "academic",
-            "university",
-            "college",
-        ],
-        "projects": [
-            "projects",
-            "personal projects",
-            "project experience",
-        ],
-    }
-
-    for section, keywords in section_keywords.items():
+    for section, keywords in SECTION_KEYWORDS.items():
         for keyword in keywords:
-            if keyword in normalized:
+            if contains_keyword(normalized, keyword):
                 sections[section] = True
                 break
 
     return sections
 
 
+def count_action_verbs(text: str) -> int:
+    """
+    Count unique action verbs used in the resume.
+    """
+    normalized = normalize_text(text)
+
+    return sum(
+        1
+        for verb in ACTION_VERBS
+        if contains_keyword(normalized, verb)
+    )
+
+
+def count_numbers(text: str) -> int:
+    """
+    Detect numbers that may represent measurable achievements.
+
+    Examples:
+        20%
+        50 users
+        $1000
+        3 years
+    """
+    if not text:
+        return 0
+
+    matches = re.findall(
+        r"\b\d+(?:\.\d+)?(?:%|[kKmMbB])?\b",
+        text,
+    )
+
+    return len(matches)
+
+
 def calculate_score(
     text: str,
     skills: list[str],
-    sections: dict,
+    sections: dict[str, bool],
 ) -> int:
+    """
+    Calculate a deterministic resume quality score.
+
+    Maximum = 100 points.
+    """
+
+    normalized = normalize_text(text)
+
+    if not normalized:
+        return 0
 
     score = 0
 
-    # Resume has meaningful content
-    if len(text) >= 500:
-        score += 15
+    # ---------------------------------------------------------
+    # 1. Resume content length - 15 points
+    # ---------------------------------------------------------
 
-    if len(text) >= 1000:
-        score += 10
+    word_count = len(normalized.split())
 
-    # Skills
-    if len(skills) >= 3:
-        score += 10
+    if word_count >= 300:
+        score += 5
 
-    if len(skills) >= 7:
-        score += 10
+    if word_count >= 500:
+        score += 5
 
-    # Sections
+    if word_count >= 700:
+        score += 5
+
+    # ---------------------------------------------------------
+    # 2. Technical skills - 20 points
+    # ---------------------------------------------------------
+
+    skill_count = len(skills)
+
+    if skill_count >= 3:
+        score += 5
+
+    if skill_count >= 5:
+        score += 5
+
+    if skill_count >= 8:
+        score += 5
+
+    if skill_count >= 12:
+        score += 5
+
+    # ---------------------------------------------------------
+    # 3. Resume structure - 30 points
+    # ---------------------------------------------------------
+
     section_weights = {
-        "contact": 10,
-        "summary": 10,
-        "skills": 10,
-        "experience": 15,
-        "education": 10,
-        "projects": 10,
+        "contact": 5,
+        "summary": 5,
+        "skills": 5,
+        "experience": 7,
+        "education": 4,
+        "projects": 4,
     }
 
     for section, weight in section_weights.items():
-        if sections.get(section):
+        if sections.get(section, False):
             score += weight
+
+    # ---------------------------------------------------------
+    # 4. Action verbs - 15 points
+    # ---------------------------------------------------------
+
+    action_verb_count = count_action_verbs(normalized)
+
+    if action_verb_count >= 2:
+        score += 5
+
+    if action_verb_count >= 4:
+        score += 5
+
+    if action_verb_count >= 6:
+        score += 5
+
+    # ---------------------------------------------------------
+    # 5. Measurable achievements - 10 points
+    # ---------------------------------------------------------
+
+    number_count = count_numbers(normalized)
+
+    if number_count >= 2:
+        score += 5
+
+    if number_count >= 5:
+        score += 5
+
+    # ---------------------------------------------------------
+    # 6. Basic content quality - 10 points
+    # ---------------------------------------------------------
+
+    if sections.get("experience") and sections.get("education"):
+        score += 5
+
+    if sections.get("projects") and sections.get("skills"):
+        score += 5
 
     return min(score, 100)
 
 
 def generate_suggestions(
+    text: str,
     skills: list[str],
-    sections: dict,
+    sections: dict[str, bool],
 ) -> list[str]:
+    """
+    Generate deterministic improvement suggestions.
+    """
 
-    suggestions = []
+    normalized = normalize_text(text)
+
+    suggestions: list[str] = []
+
+    word_count = len(normalized.split())
+    action_verb_count = count_action_verbs(normalized)
+    number_count = count_numbers(normalized)
+
+    # ---------------------------------------------------------
+    # Structure suggestions
+    # ---------------------------------------------------------
+
+    if not sections["contact"]:
+        suggestions.append(
+            "Add clear contact information including email, phone, "
+            "LinkedIn, or GitHub."
+        )
 
     if not sections["summary"]:
         suggestions.append(
-            "Add a professional summary at the beginning of the resume."
+            "Add a concise professional summary describing your "
+            "experience, strengths, and career goals."
         )
 
     if not sections["skills"]:
         suggestions.append(
-            "Add a dedicated technical skills section."
+            "Add a dedicated technical skills section with relevant "
+            "technologies and tools."
         )
 
     if not sections["experience"]:
         suggestions.append(
-            "Add relevant work experience or internship experience."
+            "Add relevant work experience, internships, or practical "
+            "professional experience."
         )
 
     if not sections["education"]:
         suggestions.append(
-            "Add your education details."
+            "Add your education details, degree, institution, and "
+            "relevant academic information."
         )
 
     if not sections["projects"]:
         suggestions.append(
-            "Add relevant projects with technologies and measurable results."
+            "Add relevant projects and describe the technologies used "
+            "and the results achieved."
         )
 
-    if len(skills) < 5:
+    # ---------------------------------------------------------
+    # Skills suggestions
+    # ---------------------------------------------------------
+
+    if len(skills) < 3:
         suggestions.append(
-            "Add more relevant technical skills and keywords."
+            "Include more relevant technical skills and job-specific "
+            "keywords to improve ATS matching."
         )
-
-    if len(skills) >= 10:
+    elif len(skills) < 6:
         suggestions.append(
-            "Good technical skill coverage. Focus on measurable achievements."
+            "Consider adding more relevant technical skills that match "
+            "the roles you are targeting."
         )
 
-    return suggestions
+    # ---------------------------------------------------------
+    # Achievement suggestions
+    # ---------------------------------------------------------
+
+    if action_verb_count < 3:
+        suggestions.append(
+            "Use stronger action verbs such as developed, implemented, "
+            "optimized, automated, designed, or delivered."
+        )
+
+    if number_count < 3:
+        suggestions.append(
+            "Add measurable achievements using numbers, percentages, "
+            "time saved, revenue, users, or performance improvements."
+        )
+
+    # ---------------------------------------------------------
+    # Resume length
+    # ---------------------------------------------------------
+
+    if word_count < 300:
+        suggestions.append(
+            "Your resume appears short. Add relevant experience, "
+            "projects, achievements, and technical details where appropriate."
+        )
+
+    elif word_count > 1500:
+        suggestions.append(
+            "Your resume is quite long. Consider removing repetitive "
+            "or less relevant information."
+        )
+
+    # ---------------------------------------------------------
+    # Positive feedback
+    # ---------------------------------------------------------
+
+    if (
+        len(skills) >= 10
+        and sections["experience"]
+        and sections["projects"]
+    ):
+        suggestions.append(
+            "Strong technical coverage. Focus on measurable achievements "
+            "and tailoring keywords to each target job."
+        )
+
+    # Keep the response manageable.
+    return suggestions[:8]
 
 
 def analyze_resume(text: str) -> dict:
+    """
+    Complete deterministic resume analysis.
+    """
+
+    if not text or not text.strip():
+        return {
+            "score": 0,
+            "skills": [],
+            "sections": {
+                "contact": False,
+                "summary": False,
+                "skills": False,
+                "experience": False,
+                "education": False,
+                "projects": False,
+            },
+            "suggestions": [
+                "No readable resume content was found."
+            ],
+        }
 
     skills = detect_skills(text)
 
@@ -201,6 +511,7 @@ def analyze_resume(text: str) -> dict:
     )
 
     suggestions = generate_suggestions(
+        text=text,
         skills=skills,
         sections=sections,
     )
