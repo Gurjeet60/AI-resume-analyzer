@@ -19,3 +19,17 @@ dist/
 
 # OS
 .DS_Store
+
+# Secrets / private keys
+*.pem
+*.key
+
+# User uploaded files
+uploads/
+backend/uploads/
+
+# AWS CLI installation files
+aws/
+backend/aws/
+awscliv2.zip
+backend/awscliv2.zip
