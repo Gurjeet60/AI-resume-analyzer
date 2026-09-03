@@ -159,17 +159,20 @@ jobs:
           --from-literal=secret-key=$SECRET_KEY \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Patch the deployment with the correct RDS endpoint
-        # We'll use Kustomize to patch the DATABASE_URL and DB_HOST env vars
+        # Fetch RDS endpoint (already stored in output from previous step)
+        RDS_ENDPOINT="${{ steps.rds.outputs.RDS_ENDPOINT }}"
+
+        # Apply Kustomize (sets the image tag)
         cd k8s
         kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
-        # Use Kustomize edit to update environment variables? Simpler: use kubectl set env
-        # Instead, we'll apply and then patch the deployment
         kubectl apply -k .
-        # Patch the deployment with the RDS endpoint
+
+        # Override environment variables with actual values
         kubectl set env deployment/resume-app -n resume \
-          DB_HOST=${{ steps.rds.outputs.RDS_ENDPOINT }} \
-          DATABASE_URL=postgresql://resume_admin:$(POSTGRES_PASSWORD)@${{ steps.rds.outputs.RDS_ENDPOINT }}:5432/resume_db
+          DATABASE_URL="postgresql://resume_admin:${DB_PASSWORD}@${RDS_ENDPOINT}:5432/resume_db" \
+          DB_HOST="${RDS_ENDPOINT}" \
+          DB_USER="resume_admin" \
+          DB_NAME="resume_db"
 
         # Wait for rollout
         kubectl rollout status deployment/resume-app -n resume
