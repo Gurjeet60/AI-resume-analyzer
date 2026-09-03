@@ -1,15 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-
-# Track all active resource assets
 resources:
   - deployment.yaml
   - service.yaml
   - hpa.yaml
-   
-# This block allows our pipeline to inject unique image hashes safely
+
+# This placeholder will be replaced by the pipeline
 images:
-  - name: ://amazonaws.com
+  - name: _placeholder
+    newName: <will-be-replaced>
     newTag: latest
-    

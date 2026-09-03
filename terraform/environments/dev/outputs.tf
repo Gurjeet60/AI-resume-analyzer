@@ -37,3 +37,11 @@ output "eks_cluster_arn" {
 output "eks_node_group_name" {
   value = module.eks.node_group_name
 }
+
+output "db_endpoint" {
+  value = module.rds.db_endpoint
+}
+
+output "db_port" {
+  value = module.rds.db_port
+}

@@ -6,96 +6,150 @@ on:
 
 permissions:
   contents: read
+  security-events: write   # For Trivy SARIF upload
 
 jobs:
   devsecops-pipeline:
-    name: Validate, Secure, Cross-Compile & Deploy
+    name: Validate, Secure, Build & Deploy
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 0   # SonarQube needs full history
 
-    # 🛡️ SECURITY STEP 1: Scan for Hardcoded Secrets
-    - name: Run TruffleHog Secrets Scanner
+    # ================================================================
+    # 1. SECURITY SCANS
+    # ================================================================
+
+    - name: Run TruffleHog (secrets detection)
       uses: trufflesecurity/trufflehog@main
       with:
         base: ${{ github.event.before }}
         head: HEAD
         extra_args: --debug --only-verified
 
-    # 🌟 MULTI-ARCH FIX: Installs QEMU to cross-compile Intel to ARM64 safely
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v4
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.projectKey=ai-resume-analyzer
+          -Dsonar.sources=.
+          -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
+
+    # ================================================================
+    # 2. SET UP DOCKER BUILDX & QEMU (for ARM64)
+    # ================================================================
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
-    # 🏎️ COST OPTIMIZATION: Setup Build Engine Cache Environment
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    # 🔐 SECURE AUTHENTICATION: Using your stored static repository secrets
+    # ================================================================
+    # 3. AUTHENTICATE TO AWS & ECR
+    # ================================================================
+
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+        aws-region: ap-south-1
 
-    # 🌟 NATIVE COMPILED PLUGIN AUTHENTICATION: Completely bypasses bash string masking errors
     - name: Log in to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # 🚀 PRODUCTION BUILD & DEPLOY TO ECR
-    - name: Build and Push Container Image
+    # ================================================================
+    # 4. BUILD & PUSH BACKEND IMAGE
+    # ================================================================
+
+    - name: Build and Push Backend
       uses: docker/build-push-action@v6
       with:
-        context: .
+        context: ./backend
         push: true
         platforms: linux/arm64
-        # Uses the dynamic secure registry token output generated inside plugin memory
         tags: |
-          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-app:${{ github.sha }}
-          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-app:latest
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:${{ github.sha }}
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # 🔐 SET UP CLUSTER ROUTING CONTEXT
-    - name: Update EKS Kubeconfig Context
-      run: |
-        aws eks update-kubeconfig --region us-east-1 --name ai-resume-analyzer
+    # ================================================================
+    # 5. BUILD & PUSH FRONTEND IMAGE
+    # ================================================================
 
-    # 🚀 ROLLING UPGRADE VIA NATIVE FIXED KUSTOMIZE STRUCTURE
-    - name: Deploy Rolling Update to AWS EKS
+    - name: Build and Push Frontend
+      uses: docker/build-push-action@v6
+      with:
+        context: ./frontend
+        push: true
+        platforms: linux/arm64
+        tags: |
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # ================================================================
+    # 6. CONTAINER VULNERABILITY SCAN (Trivy)
+    # ================================================================
+
+    - name: Run Trivy on Frontend Image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-frontend.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-frontend.sarif'
+
+    # ================================================================
+    # 7. DEPLOY TO EKS
+    # ================================================================
+
+    - name: Update EKS Kubeconfig
       run: |
-        # 1. Enforce namespace existence boundaries
+        aws eks update-kubeconfig --region ap-south-1 --name ai-resume-analyzer-dev
+
+    - name: Create secrets and deploy
+      run: |
+        # Create namespace if not exists
         kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
-        
-        # 2. Inject your encrypted OpenAI key securely into the cluster's secret vault
+
+        # Retrieve DB password from AWS Secrets Manager
+        DB_PASSWORD=$(aws secretsmanager get-secret-value \
+          --secret-id ai-resume-analyzer/dev/database \
+          --query SecretString --output text | jq -r .password)
+
+        # Create database secret
+        kubectl create secret generic db-secret \
+          --from-literal=password=$DB_PASSWORD \
+          -n resume --dry-run=client -o yaml | kubectl apply -f -
+
+        # Create OpenAI secret
         kubectl create secret generic ai-secret-store \
           --from-literal=OPENAI_KEY="${{ secrets.OPENAI_API_KEY }}" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
-        
-        # 3. 🌟 BULLETPROOF BYPASS: Write a perfect, hardcoded kustomization manifest file natively
+
+        # Generate and create app-secrets (for SECRET_KEY)
+        SECRET_KEY=$(openssl rand -hex 32)
+        kubectl create secret generic app-secrets \
+          --from-literal=secret-key=$SECRET_KEY \
+          -n resume --dry-run=client -o yaml | kubectl apply -f -
+
+        # Use Kustomize to set the frontend image
         cd k8s
-        cat << EOF > kustomization.yaml
-        apiVersion: kustomize.config.k8s.io/v1beta1
-        kind: Kustomization
-        
-        resources:
-          - deployment.yaml
-          - service.yaml
-          - hpa.yaml
-        
-        images:
-          - name: ://amazonaws.com
-            newName: ://amazonaws.com
-            newTag: "${{ github.sha }}"
-        EOF
-        
-        # 4. Deploy all resources natively using Kustomize (This passes through webhooks perfectly)
+        kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
         kubectl apply -k .
-        
-        # 5. Force cluster nodes to discard stale container layers
-        kubectl rollout restart deployment resume-app -n resume
+        kubectl rollout status deployment/resume-app -n resume

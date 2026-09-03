@@ -17,55 +17,54 @@ spec:
     spec:
       containers:
         - name: resume-app
-          # This acts as our safe baseline pointer. Kustomize will update it dynamically.
-          image: ://amazonaws.com
+          image: _placeholder   # Kustomize will replace with frontend image
           imagePullPolicy: Always
           ports:
             - containerPort: 80
           env:
+            # ============================================
+            # Database credentials from Secret
+            # ============================================
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: password
+
+            # ============================================
+            # Database connection string
+            # ============================================
             - name: DATABASE_URL
-              value: "postgresql://postgres:ResumeAdmin2026Secure@://amazonaws.com"
+              value: "postgresql://resume_admin:$(POSTGRES_PASSWORD)@<RDS_ENDPOINT>:5432/resume_db"
+
+            # Individual env vars (your backend may use these)
+            - name: DB_HOST
+              value: "ai-resume-analyzer-dev-postgres.ct2q6sim48e6.ap-south-1.rds.amazonaws.com"
             - name: DB_PORT
               value: "5432"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: POSTGRES_PORT
-              value: "5432"
-            - name: PORT
-              value: "5432"
-            - name: DB_HOST
-              value: "://amazonaws.com"
-            - name: DATABASE_HOST
-              value: "://amazonaws.com"
-            - name: POSTGRES_HOST
-              value: "://amazonaws.com"
             - name: DB_NAME
-              value: "resume_db"
-            - name: DATABASE_NAME
-              value: "resume_db"
-            - name: POSTGRES_DB
               value: "resume_db"
             - name: DB_USER
               value: "resume_admin"
-            - name: DATABASE_USER
-              value: "resume_admin"
-            - name: POSTGRES_USER
-              value: "resume_admin"
-            - name: DB_PASSWORD
-              value: "ResumeAdmin2026Secure"
-            - name: DATABASE_PASSWORD
-              value: "ResumeAdmin2026Secure"
-            - name: POSTGRES_PASSWORD
-              value: "ResumeAdmin2026Secure"
-            - name: PGSSLMODE
-              value: "require"
+
+            # ============================================
+            # Security
+            # ============================================
             - name: SECRET_KEY
-              value: "ResumeAdmin2026Secure"
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: secret-key   # We'll create this secret in the pipeline
+
+            # ============================================
+            # OpenAI (optional)
+            # ============================================
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: ai-secret-store
                   key: OPENAI_KEY
+
           resources:
             requests:
               memory: "256Mi"
@@ -73,3 +72,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+          # ============================================
+          # HEALTH PROBES (Self-healing)
+          # ============================================
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
