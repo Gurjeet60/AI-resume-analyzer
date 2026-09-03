@@ -1,0 +1,25 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: resume-app-hpa
+  namespace: resume
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: resume-app
+  minReplicas: 1 # 🏎️ COST OPTIMIZATION: Drops down to 1 pod when nobody is using it
+  maxReplicas: 5 # 🚀 AUTO-SCALING: Scales up to 5 pods during heavy resume parsing
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70 # Scales up if average CPU usage hits 70%
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80 # Scales up if memory usage hits 80%

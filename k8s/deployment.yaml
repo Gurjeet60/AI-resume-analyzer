@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resume-app
+  namespace: resume
+  labels:
+    app: resume-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: resume-app
+  template:
+    metadata:
+      labels:
+        app: resume-app
+    spec:
+      containers:
+        - name: resume-app
+          # This acts as our safe baseline pointer. Kustomize will update it dynamically.
+          image: ://amazonaws.com
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:ResumeAdmin2026Secure@://amazonaws.com"
+            - name: DB_PORT
+              value: "5432"
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: PORT
+              value: "5432"
+            - name: DB_HOST
+              value: "://amazonaws.com"
+            - name: DATABASE_HOST
+              value: "://amazonaws.com"
+            - name: POSTGRES_HOST
+              value: "://amazonaws.com"
+            - name: DB_NAME
+              value: "resume_db"
+            - name: DATABASE_NAME
+              value: "resume_db"
+            - name: POSTGRES_DB
+              value: "resume_db"
+            - name: DB_USER
+              value: "resume_admin"
+            - name: DATABASE_USER
+              value: "resume_admin"
+            - name: POSTGRES_USER
+              value: "resume_admin"
+            - name: DB_PASSWORD
+              value: "ResumeAdmin2026Secure"
+            - name: DATABASE_PASSWORD
+              value: "ResumeAdmin2026Secure"
+            - name: POSTGRES_PASSWORD
+              value: "ResumeAdmin2026Secure"
+            - name: PGSSLMODE
+              value: "require"
+            - name: SECRET_KEY
+              value: "ResumeAdmin2026Secure"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret-store
+                  key: OPENAI_KEY
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

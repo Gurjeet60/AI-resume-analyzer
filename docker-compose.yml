@@ -1,0 +1,90 @@
+services:
+
+  # ==========================================================
+  # PostgreSQL
+  # ==========================================================
+
+  postgres:
+    image: postgres:16-alpine
+
+    container_name: resume-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-resume_db}
+      POSTGRES_USER: ${POSTGRES_USER:-resume_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-resume_user} -d ${POSTGRES_DB:-resume_db}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    ports:
+      - "5432:5432"
+
+
+  # ==========================================================
+  # Backend
+  # ==========================================================
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: resume-backend
+
+    restart: unless-stopped
+
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-resume_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-resume_db}
+
+      SECRET_KEY: ${SECRET_KEY}
+
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "8000:8000"
+
+
+  # ==========================================================
+  # Frontend
+  # ==========================================================
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: resume-frontend
+
+    restart: unless-stopped
+
+    depends_on:
+      - backend
+
+    ports:
+      - "8080:80"
+
+
+# ============================================================
+# Persistent storage
+# ============================================================
+
+volumes:
+  postgres_data:

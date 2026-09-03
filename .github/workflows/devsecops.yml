@@ -1,0 +1,101 @@
+name: Production DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  devsecops-pipeline:
+    name: Validate, Secure, Cross-Compile & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # 🛡️ SECURITY STEP 1: Scan for Hardcoded Secrets
+    - name: Run TruffleHog Secrets Scanner
+      uses: trufflesecurity/trufflehog@main
+      with:
+        base: ${{ github.event.before }}
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    # 🌟 MULTI-ARCH FIX: Installs QEMU to cross-compile Intel to ARM64 safely
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    # 🏎️ COST OPTIMIZATION: Setup Build Engine Cache Environment
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    # 🔐 SECURE AUTHENTICATION: Using your stored static repository secrets
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    # 🌟 NATIVE COMPILED PLUGIN AUTHENTICATION: Completely bypasses bash string masking errors
+    - name: Log in to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # 🚀 PRODUCTION BUILD & DEPLOY TO ECR
+    - name: Build and Push Container Image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        platforms: linux/arm64
+        # Uses the dynamic secure registry token output generated inside plugin memory
+        tags: |
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-app:${{ github.sha }}
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-app:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # 🔐 SET UP CLUSTER ROUTING CONTEXT
+    - name: Update EKS Kubeconfig Context
+      run: |
+        aws eks update-kubeconfig --region us-east-1 --name ai-resume-analyzer
+
+    # 🚀 ROLLING UPGRADE VIA NATIVE FIXED KUSTOMIZE STRUCTURE
+    - name: Deploy Rolling Update to AWS EKS
+      run: |
+        # 1. Enforce namespace existence boundaries
+        kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
+        
+        # 2. Inject your encrypted OpenAI key securely into the cluster's secret vault
+        kubectl create secret generic ai-secret-store \
+          --from-literal=OPENAI_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          -n resume --dry-run=client -o yaml | kubectl apply -f -
+        
+        # 3. 🌟 BULLETPROOF BYPASS: Write a perfect, hardcoded kustomization manifest file natively
+        cd k8s
+        cat << EOF > kustomization.yaml
+        apiVersion: kustomize.config.k8s.io/v1beta1
+        kind: Kustomization
+        
+        resources:
+          - deployment.yaml
+          - service.yaml
+          - hpa.yaml
+        
+        images:
+          - name: ://amazonaws.com
+            newName: ://amazonaws.com
+            newTag: "${{ github.sha }}"
+        EOF
+        
+        # 4. Deploy all resources natively using Kustomize (This passes through webhooks perfectly)
+        kubectl apply -k .
+        
+        # 5. Force cluster nodes to discard stale container layers
+        kubectl rollout restart deployment resume-app -n resume
