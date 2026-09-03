@@ -30,13 +30,16 @@ jobs:
         head: HEAD
         extra_args: --debug --only-verified
 
+    # SonarQube - runs only if SONAR_TOKEN secret is set
     - name: SonarQube Scan
-      uses: SonarSource/sonarqube-scan-action@v4
+      if: env.SONAR_TOKEN != ''
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      uses: SonarSource/sonarqube-scan-action@v4
       with:
         args: >
           -Dsonar.projectKey=ai-resume-analyzer
+          -Dsonar.organization=Gurjeet60  # <-- REPLACE with your SonarCloud org key
           -Dsonar.sources=.
           -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
 
@@ -122,9 +125,19 @@ jobs:
       run: |
         aws eks update-kubeconfig --region ap-south-1 --name ai-resume-analyzer-dev
 
+    - name: Fetch RDS endpoint from AWS
+      id: rds
+      run: |
+        RDS_ENDPOINT=$(aws rds describe-db-instances \
+          --db-instance-identifier ai-resume-analyzer-dev-postgres \
+          --region ap-south-1 \
+          --query 'DBInstances[0].Endpoint.Address' \
+          --output text)
+        echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
+
     - name: Create secrets and deploy
       run: |
-        # Create namespace if not exists
+        # Create namespace
         kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
 
         # Retrieve DB password from AWS Secrets Manager
@@ -148,8 +161,17 @@ jobs:
           --from-literal=secret-key=$SECRET_KEY \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Use Kustomize to set the frontend image
+        # Patch the deployment with the correct RDS endpoint
+        # We'll use Kustomize to patch the DATABASE_URL and DB_HOST env vars
         cd k8s
         kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
+        # Use Kustomize edit to update environment variables? Simpler: use kubectl set env
+        # Instead, we'll apply and then patch the deployment
         kubectl apply -k .
+        # Patch the deployment with the RDS endpoint
+        kubectl set env deployment/resume-app -n resume \
+          DB_HOST=${{ steps.rds.outputs.RDS_ENDPOINT }} \
+          DATABASE_URL=postgresql://resume_admin:$(POSTGRES_PASSWORD)@${{ steps.rds.outputs.RDS_ENDPOINT }}:5432/resume_db
+
+        # Wait for rollout
         kubectl rollout status deployment/resume-app -n resume
