@@ -39,7 +39,7 @@ jobs:
       with:
         args: >
           -Dsonar.projectKey=ai-resume-analyzer
-          -Dsonar.organization=Gurjeet60  # <-- REPLACE with your SonarCloud org key
+          -Dsonar.organization=gurjeet60  # <-- REPLACE with your SonarCloud org key
           -Dsonar.sources=.
           -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
 
