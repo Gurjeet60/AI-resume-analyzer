@@ -4,13 +4,9 @@ metadata:
   name: backend
   namespace: resume
 spec:
+  selector:
+    app: resume-backend
   ports:
     - port: 8000
       targetPort: 8000
-  # No selector – this creates a "headless" service but we need a cluster IP.
-  # Actually we need a service with a valid cluster IP. Without a selector, the service will have no endpoints but still get a cluster IP.
-  # Nginx will then use that IP (which exists) and not fail at startup.
-  # However, if there are no endpoints, requests will fail, but at least the pod starts.
-  # We'll use a selector that points to a non-existent deployment, but the service will still get an IP.
-  selector:
-    app: resume-backend  # This label doesn't exist, but service will still have a cluster IP.
+  type: ClusterIP

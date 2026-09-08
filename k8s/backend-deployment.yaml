@@ -6,7 +6,7 @@ metadata:
   labels:
     app: resume-backend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: resume-backend
@@ -17,24 +17,16 @@ spec:
     spec:
       containers:
         - name: backend
-          image: _placeholder-backend   # will be replaced by Kustomize
+          image: _placeholder-backend   # Kustomize replaces this
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
             - name: DATABASE_URL
-              value: "postgresql://resume_admin:$(POSTGRES_PASSWORD)@<RDS_ENDPOINT>:5432/resume_db"   # will be patched
-            - name: DB_HOST
-              value: "<RDS_ENDPOINT>"
-            - name: DB_USER
-              value: "resume_admin"
-            - name: DB_NAME
-              value: "resume_db"
-            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: db-secret
-                  key: password
+                  key: database-url
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -47,16 +39,16 @@ spec:
                   key: OPENAI_KEY
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "128Mi"
+              cpu: "50m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "256Mi"
+              cpu: "200m"
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 20
             periodSeconds: 10
           readinessProbe:
             httpGet:

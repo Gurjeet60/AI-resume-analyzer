@@ -20,9 +20,9 @@ jobs:
         fetch-depth: 0
 
     # ============================================================
-    # Security Scans (optional)
+    # 1. Security Scans
     # ============================================================
-    - name: Run TruffleHog
+    - name: Run TruffleHog (secrets detection)
       uses: trufflesecurity/trufflehog@main
       with:
         base: ${{ github.event.before }}
@@ -43,7 +43,7 @@ jobs:
           -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
 
     # ============================================================
-    # Build & Push Multi‑Arch Images (AMD64 + ARM64)
+    # 2. Set up Docker Buildx & QEMU (for multi‑arch)
     # ============================================================
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
@@ -51,6 +51,9 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    # ============================================================
+    # 3. Authenticate to AWS & ECR
+    # ============================================================
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -62,32 +65,38 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    # ============================================================
+    # 4. Build & Push Backend (multi‑arch)
+    # ============================================================
     - name: Build and Push Backend
       uses: docker/build-push-action@v6
       with:
         context: ./backend
         push: true
-        platforms: linux/amd64,linux/arm64   # <--- multi‑arch
+        platforms: linux/amd64,linux/arm64
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    # ============================================================
+    # 5. Build & Push Frontend (multi‑arch)
+    # ============================================================
     - name: Build and Push Frontend
       uses: docker/build-push-action@v6
       with:
         context: ./frontend
         push: true
-        platforms: linux/amd64,linux/arm64   # <--- multi‑arch
+        platforms: linux/amd64,linux/arm64
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     # ============================================================
-    # Trivy Scan (now works because AMD64 image is available)
+    # 6. Container Vulnerability Scan (Trivy)
     # ============================================================
-    - name: Run Trivy
+    - name: Run Trivy on Frontend Image
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
@@ -95,13 +104,13 @@ jobs:
         output: 'trivy-frontend.sarif'
         severity: 'CRITICAL,HIGH'
 
-    - name: Upload Trivy results
+    - name: Upload Trivy results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: 'trivy-frontend.sarif'
 
     # ============================================================
-    # Deploy to EKS (still uses ARM64 for cost efficiency)
+    # 7. Deploy to EKS
     # ============================================================
     - name: Install Kustomize
       run: |
@@ -114,31 +123,48 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
+        # Create namespace if not exists
         kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Create dummy backend Service if missing
-        kubectl get svc backend -n resume &>/dev/null || \
-          kubectl create service clusterip backend --tcp=8000:8000 -n resume
+        # ============================================================
+        # Create/update secrets
+        # ============================================================
 
-        # Database password from Secrets Manager
+        # 1. Database secret with full URL
+        # RDS host – replace if different (from Terraform output)
+        RDS_HOST="ai-resume-analyzer-dev-postgres.ct2q6sim48e6.ap-south-1.rds.amazonaws.com"
         DB_PASSWORD=$(aws secretsmanager get-secret-value \
           --secret-id ai-resume-analyzer/dev/database \
           --query SecretString --output text | jq -r .password)
 
+        DATABASE_URL="postgresql://resume_admin:$DB_PASSWORD@$RDS_HOST:5432/resume_db"
+
         kubectl create secret generic db-secret \
           --from-literal=password="$DB_PASSWORD" \
+          --from-literal=database-url="$DATABASE_URL" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
+        # 2. OpenAI API key (if set)
         kubectl create secret generic ai-secret-store \
           --from-literal=OPENAI_KEY="${{ secrets.OPENAI_API_KEY }}" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
+        # 3. App secrets (random SECRET_KEY)
         SECRET_KEY=$(openssl rand -hex 32)
         kubectl create secret generic app-secrets \
           --from-literal=secret-key="$SECRET_KEY" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
+        # ============================================================
+        # Deploy with Kustomize
+        # ============================================================
         cd k8s
+
+        # Replace both image placeholders with the SHA tag
         kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
+        kustomize edit set image _placeholder-backend=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:${{ github.sha }}
+
+        # Apply manifests and wait for rollout
         kubectl apply -k .
         kubectl rollout status deployment/resume-app -n resume --timeout=5m
+        kubectl rollout status deployment/resume-backend -n resume --timeout=5m

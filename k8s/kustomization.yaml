@@ -2,13 +2,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - deployment.yaml
-  - service.yaml
+  - deployment.yaml          # frontend
+  - service.yaml             # frontend service
   - hpa.yaml
-  - backend-service.yaml 
+  - backend-deployment.yaml
+  - backend-service.yaml
 
-# This placeholder will be replaced by the pipeline
 images:
   - name: _placeholder
+    newName: <will-be-replaced>
+    newTag: latest
+  - name: _placeholder-backend
     newName: <will-be-replaced>
     newTag: latest
