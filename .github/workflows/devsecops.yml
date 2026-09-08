@@ -20,7 +20,7 @@ jobs:
         fetch-depth: 0
 
     # ============================================================
-    # Security Scans (optional if secrets missing)
+    # Security Scans (optional)
     # ============================================================
     - name: Run TruffleHog
       uses: trufflesecurity/trufflehog@main
@@ -43,7 +43,7 @@ jobs:
           -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
 
     # ============================================================
-    # Build & Push Images
+    # Build & Push Images (no :latest, only SHA tag)
     # ============================================================
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
@@ -70,7 +70,6 @@ jobs:
         platforms: linux/arm64
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:${{ github.sha }}
-          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -82,7 +81,6 @@ jobs:
         platforms: linux/arm64
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
-          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -118,7 +116,7 @@ jobs:
       run: |
         kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Create dummy backend service if missing (so Nginx can resolve)
+        # Create dummy backend Service if missing (so Nginx can resolve)
         kubectl get svc backend -n resume &>/dev/null || \
           kubectl create service clusterip backend --tcp=8000:8000 -n resume
 
@@ -141,6 +139,7 @@ jobs:
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
         cd k8s
+        # Replace placeholder with full image:tag (only SHA, no :latest)
         kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
         kubectl apply -k .
         kubectl rollout status deployment/resume-app -n resume --timeout=5m
