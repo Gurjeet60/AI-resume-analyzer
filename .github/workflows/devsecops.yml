@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # For Trivy SARIF upload
+  security-events: write   # for Trivy SARIF upload
 
 jobs:
   devsecops-pipeline:
@@ -14,15 +14,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # ============================================================
+    # 1. Checkout code
+    # ============================================================
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0   # SonarQube needs full history
 
-    # ================================================================
-    # 1. SECURITY SCANS
-    # ================================================================
-
+    # ============================================================
+    # 2. Security Scans
+    # ============================================================
     - name: Run TruffleHog (secrets detection)
       uses: trufflesecurity/trufflehog@main
       with:
@@ -30,82 +32,76 @@ jobs:
         head: HEAD
         extra_args: --debug --only-verified
 
-    # SonarQube - runs only if SONAR_TOKEN secret is set
     - name: SonarQube Scan
-      if: env.SONAR_TOKEN != ''
+      uses: SonarSource/sonarqube-scan-action@v4
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      uses: SonarSource/sonarqube-scan-action@v4
       with:
         args: >
           -Dsonar.projectKey=ai-resume-analyzer
-          -Dsonar.organization=gurjeet60  # <-- REPLACE with your SonarCloud org key
           -Dsonar.sources=.
           -Dsonar.exclusions=**/node_modules/**,**/*.test.js,terraform/**,k8s/**,**/dist/**
 
-    # ================================================================
-    # 2. SET UP DOCKER BUILDX & QEMU (for ARM64)
-    # ================================================================
-
+    # ============================================================
+    # 3. Set up Docker Buildx & QEMU for ARM64
+    # ============================================================
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    # ================================================================
-    # 3. AUTHENTICATE TO AWS & ECR
-    # ================================================================
-
+    # ============================================================
+    # 4. Authenticate to AWS & ECR
+    # ============================================================
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-south-1
+        aws-region: ap-south-1   # <--- matches your Terraform region
 
     - name: Log in to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # ================================================================
-    # 4. BUILD & PUSH BACKEND IMAGE
-    # ================================================================
-
+    # ============================================================
+    # 5. Build & Push Backend Image
+    # ============================================================
     - name: Build and Push Backend
       uses: docker/build-push-action@v6
       with:
         context: ./backend
         push: true
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/arm64   # Graviton instances
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:${{ github.sha }}
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-backend:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # ================================================================
-    # 5. BUILD & PUSH FRONTEND IMAGE
-    # ================================================================
-
+    # ============================================================
+    # 6. Build & Push Frontend Image
+    # ============================================================
     - name: Build and Push Frontend
       uses: docker/build-push-action@v6
       with:
         context: ./frontend
         push: true
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/arm64
         tags: |
           ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
+          ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
-    # ================================================================
-    # 6. CONTAINER VULNERABILITY SCAN (Trivy)
-    # ================================================================
 
-    - name: Run Trivy on Frontend (filesystem scan)
+    # ============================================================
+    # 7. Container Vulnerability Scan (Trivy)
+    # ============================================================
+    - name: Run Trivy on Frontend Image
       uses: aquasecurity/trivy-action@master
       with:
-        scan-type: 'fs'
-        scan-ref: './frontend'         # or '.' to scan the whole repo
+        image-ref: ${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
         format: 'sarif'
         output: 'trivy-frontend.sarif'
         severity: 'CRITICAL,HIGH'
@@ -115,64 +111,48 @@ jobs:
       with:
         sarif_file: 'trivy-frontend.sarif'
 
-    # ================================================================
-    # 7. DEPLOY TO EKS
-    # ================================================================
+    # ============================================================
+    # 8. Deploy to EKS
+    # ============================================================
+    - name: Install Kustomize
+      run: |
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+        sudo mv kustomize /usr/local/bin/
 
-    - name: Update EKS Kubeconfig
+    - name: Update Kubeconfig
       run: |
         aws eks update-kubeconfig --region ap-south-1 --name ai-resume-analyzer-dev
 
-    - name: Fetch RDS endpoint from AWS
-      id: rds
-      run: |
-        RDS_ENDPOINT=$(aws rds describe-db-instances \
-          --db-instance-identifier ai-resume-analyzer-dev-postgres \
-          --region ap-south-1 \
-          --query 'DBInstances[0].Endpoint.Address' \
-          --output text)
-        echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
-
-    - name: Create secrets and deploy
+    - name: Deploy to Kubernetes
       run: |
         # Create namespace
         kubectl create namespace resume --dry-run=client -o yaml | kubectl apply -f -
+
+        # Ensure backend Service exists (dummy) so Nginx can resolve "backend"
+        kubectl get svc backend -n resume &>/dev/null || \
+          kubectl create service clusterip backend --tcp=8000:8000 -n resume
 
         # Retrieve DB password from AWS Secrets Manager
         DB_PASSWORD=$(aws secretsmanager get-secret-value \
           --secret-id ai-resume-analyzer/dev/database \
           --query SecretString --output text | jq -r .password)
 
-        # Create database secret
         kubectl create secret generic db-secret \
-          --from-literal=password=$DB_PASSWORD \
+          --from-literal=password="$DB_PASSWORD" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Create OpenAI secret
         kubectl create secret generic ai-secret-store \
           --from-literal=OPENAI_KEY="${{ secrets.OPENAI_API_KEY }}" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Generate and create app-secrets (for SECRET_KEY)
+        # Generate a random SECRET_KEY
         SECRET_KEY=$(openssl rand -hex 32)
         kubectl create secret generic app-secrets \
-          --from-literal=secret-key=$SECRET_KEY \
+          --from-literal=secret-key="$SECRET_KEY" \
           -n resume --dry-run=client -o yaml | kubectl apply -f -
 
-        # Fetch RDS endpoint (already stored in output from previous step)
-        RDS_ENDPOINT="${{ steps.rds.outputs.RDS_ENDPOINT }}"
-
-        # Apply Kustomize (sets the image tag)
+        # Use Kustomize to set the frontend image tag
         cd k8s
         kustomize edit set image _placeholder=${{ steps.login-ecr.outputs.registry }}/ai-resume-analyzer-frontend:${{ github.sha }}
         kubectl apply -k .
-
-        # Override environment variables with actual values
-        kubectl set env deployment/resume-app -n resume \
-          DATABASE_URL="postgresql://resume_admin:${DB_PASSWORD}@${RDS_ENDPOINT}:5432/resume_db" \
-          DB_HOST="${RDS_ENDPOINT}" \
-          DB_USER="resume_admin" \
-          DB_NAME="resume_db"
-
-        # Wait for rollout
-        kubectl rollout status deployment/resume-app -n resume
+        kubectl rollout status deployment/resume-app -n resume --timeout=5m
