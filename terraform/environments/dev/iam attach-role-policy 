@@ -1,0 +1,27 @@
+{
+    "Role": {
+        "Path": "/",
+        "RoleName": "ClusterAutoscalerRole",
+        "RoleId": "AROA2NQUQLWFARFWA65RQ",
+        "Arn": "arn:aws:iam::716228812170:role/ClusterAutoscalerRole",
+        "CreateDate": "2026-09-23T07:10:22+00:00",
+        "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Federated": "arn:aws:iam::716228812170:oidc-provider/oidc.eks.ap-south-1.amazonaws.com/id/53C922FF6544A1C03DA8ACF596D3A36B"
+                    },
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                        "StringEquals": {
+                            "oidc.eks.ap-south-1.amazonaws.com/id/53C922FF6544A1C03DA8ACF596D3A36B:sub": "system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler",
+                            "oidc.eks.ap-south-1.amazonaws.com/id/53C922FF6544A1C03DA8ACF596D3A36B:aud": "sts.amazonaws.com"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}
