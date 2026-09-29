@@ -32,12 +32,9 @@ module "ecr" {
 
 module "eks" {
   source = "../../modules/eks"
-
+  kubernetes_version = "1.36"
   cluster_name       = "ai-resume-analyzer-dev"
-  kubernetes_version = "1.33"
-
   private_subnet_ids = module.vpc.private_subnet_ids
-
   node_instance_type = "t4g.medium"
 }
 
@@ -80,3 +77,4 @@ module "rds" {
   deletion_protection = false
   skip_final_snapshot = true
 }
+
